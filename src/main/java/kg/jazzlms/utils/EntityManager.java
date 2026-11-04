@@ -1,6 +1,7 @@
 package kg.jazzlms.utils;
 
 import com.github.javafaker.Faker;
+import kg.jazzlms.models.request.CourseRequest;
 import kg.jazzlms.models.request.UserRequest;
 
 import java.util.UUID;
@@ -22,5 +23,17 @@ public class EntityManager {
     /** Минимальный пользователь (как раньше) */
     public static UserRequest generateUser() {
         return userBuilder().build();
+    }
+
+    /** Курс только с обязательным полем name (+ уникальный code) */
+    public static CourseRequest.CourseRequestBuilder courseBuilder() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        return CourseRequest.builder()
+                .name(faker.educator().course() + " " + suffix)
+                .code("C-" + suffix);
+    }
+
+    public static CourseRequest generateCourse() {
+        return courseBuilder().build();
     }
 }

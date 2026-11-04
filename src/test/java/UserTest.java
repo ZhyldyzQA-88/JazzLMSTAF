@@ -2,14 +2,17 @@ import kg.jazzlms.constants.Endpoints;
 import kg.jazzlms.controller.UserController;
 import kg.jazzlms.models.response.UserResponse;
 import kg.jazzlms.utils.EntityManager;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+@Tag("regression")
 public class UserTest {
 
     private final UserController userController = new UserController(Endpoints.BASE_URL);
 
+    @Tag("smoke")
     @Test
     public void testGetUsers() {
         List<UserResponse> users = userController.getAllUsers();

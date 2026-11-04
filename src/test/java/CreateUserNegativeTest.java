@@ -3,6 +3,7 @@ import kg.jazzlms.constants.Endpoints;
 import kg.jazzlms.controller.UserController;
 import kg.jazzlms.models.request.UserRequest;
 import kg.jazzlms.utils.EntityManager;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -14,6 +15,7 @@ import java.util.stream.Stream;
 import static kg.jazzlms.utils.EntityManager.userBuilder;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("regression")
 public class CreateUserNegativeTest {
 
     private final UserController userController = new UserController(Endpoints.BASE_URL);
@@ -37,8 +39,11 @@ public class CreateUserNegativeTest {
                 Arguments.of("username = null",    userBuilder().username(null).build()),
                 Arguments.of("username пустой",    userBuilder().username("").build()),
                 Arguments.of("username пробелы",   userBuilder().username("   ").build()),
+                // ПАДАЕТ (баг бэка): 500 вместо 400 — невалидное значение enum userType не обрабатывается
                 Arguments.of("userType невалидный", userBuilder().userType("INVALID_ROLE").build()),
+                // ПАДАЕТ (баг бэка): 201 вместо 400 — timeZone не валидируется, сохраняется "Mars/Olympus"
                 Arguments.of("timeZone невалидный", userBuilder().timeZone("Mars/Olympus").build()),
+                // ПАДАЕТ (баг бэка): 201 вместо 400 — language не валидируется, сохраняется "xx"
                 Arguments.of("language невалидный", userBuilder().language("xx").build()),
                 Arguments.of("firstName 300 символов", userBuilder().firstName("a".repeat(300)).build()),
                 Arguments.of("username 300 символов",  userBuilder().username("u".repeat(300)).build())
@@ -80,14 +85,17 @@ public class CreateUserNegativeTest {
     }
 
     // ---------- 3. Некорректное тело запроса ----------
+    // Баг бэка: HttpMessageNotReadableException (нечитаемый JSON) не обрабатывается -> 500 вместо 400.
+    // Проходят только "{}" (честный 400 по @NotBlank) и firstName:123 (Jackson приводит число к строке).
 
     @ParameterizedTest(name = "Тело: {0}")
     @ValueSource(strings = {
-            "",
+            "",               // ПАДАЕТ: 500 вместо 400 — пустое тело
             "{}",
-            "not a json",
-            "{\"firstName\": \"Casey\",",
-            "[]",
+            "not a json",     // ПАДАЕТ: 500 вместо 400 — не JSON
+            "{\"firstName\": \"Casey\",",  // ПАДАЕТ: 500 вместо 400 — обрезанный JSON
+            "[]",             // ПАДАЕТ: 500 вместо 400 — массив вместо объекта
+            // ПАДАЕТ: 500 вместо 400 — active: "yes" не приводится к boolean
             "{\"firstName\":\"Casey\",\"lastName\":\"Miller\",\"email\":\"a@b.com\",\"username\":\"u1\",\"active\":\"yes\"}",
             "{\"firstName\":123,\"lastName\":\"Miller\",\"email\":\"a@b.com\",\"username\":\"u2\"}"
     })

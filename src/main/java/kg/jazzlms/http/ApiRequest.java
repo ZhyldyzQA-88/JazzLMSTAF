@@ -19,12 +19,18 @@ public class ApiRequest {
     private static final String SLASH = "/";
     private static String token; // кэш токена на весь прогон тестов
 
+    /** Запросы от имени администратора из app.properties */
     public ApiRequest(String url) {
+        this(url, getToken(Endpoints.BASE_URL)); // логин всегда через user service
+    }
+
+    /** Запросы от имени конкретного пользователя (нужно для e2e: тренер, ученик) */
+    public ApiRequest(String url, String token) {
         this.url = url;
         this.requestSpecification = given()
                 .baseUri(url)
                 .contentType(ContentType.JSON)
-                .header("Authorization", "Bearer " + getToken(url))
+                .header("Authorization", "Bearer " + token)
                 .filter(new RequestLoggingFilter())
                 .filter(new ResponseLoggingFilter());
     }

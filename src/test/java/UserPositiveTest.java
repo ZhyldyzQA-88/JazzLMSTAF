@@ -3,6 +3,7 @@ import kg.jazzlms.controller.UserController;
 import kg.jazzlms.models.request.UserRequest;
 import kg.jazzlms.models.response.UserResponse;
 import kg.jazzlms.utils.EntityManager;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -14,11 +15,13 @@ import java.util.stream.Stream;
 import static kg.jazzlms.utils.EntityManager.userBuilder;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("regression")
 public class UserPositiveTest {
 
     private final UserController userController = new UserController(Endpoints.BASE_URL);
 
     // 1. Минимальный набор: проверяем дефолты
+    @Tag("smoke")
     @Test
     void createUserWithMinimalFieldsSetsDefaults() {
         UserRequest request = EntityManager.generateUser();

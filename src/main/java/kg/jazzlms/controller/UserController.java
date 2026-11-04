@@ -8,13 +8,20 @@ import kg.jazzlms.utils.JsonUtils;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import static kg.jazzlms.constants.Endpoints.USERS;
+import static kg.jazzlms.constants.Endpoints.USERS_ID;
 
 public class UserController extends ApiRequest {
 
     public UserController(String url) {
         super(url);
+    }
+
+    public UserController(String url, String token) {
+        super(url, token);
     }
 
     public UserResponse createUser(UserRequest request) {
@@ -38,4 +45,12 @@ public class UserController extends ApiRequest {
         return post(USERS, body);
     }
 
+    /** PUT /api/users/{id}: все поля необязательные, отправляем только нужные */
+    public Response updateUserResponse(UUID id, Map<String, Object> fields) {
+        return put(String.format(USERS_ID, id), JsonUtils.toJson(fields));
+    }
+
+    public Response deleteUserResponse(UUID id) {
+        return delete(String.format(USERS_ID, id));
+    }
 }
