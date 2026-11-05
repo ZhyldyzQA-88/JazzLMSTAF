@@ -1,0 +1,58 @@
+[
+  {
+    "name": "Баг бэка: 500 вместо 4xx (необработанная ошибка)",
+    "description": "Сервис упал с Internal Server Error там, где должен был вернуть 400/404: битый JSON, неизвестный enum, ошибка БД.",
+    "matchedStatuses": [
+      "failed"
+    ],
+    "messageRegex": "(?s).*(but was: <500>|получили 500).*"
+  },
+  {
+    "name": "Баг бэка: нет валидации (2xx вместо 400)",
+    "description": "Невалидные данные приняты: сервис ответил 200/201 вместо 400.",
+    "matchedStatuses": [
+      "failed"
+    ],
+    "messageRegex": "(?s).*expected: <400> but was: <20[01]>.*"
+  },
+  {
+    "name": "Баг бэка: настройки затираются",
+    "description": "Частичный PUT настроек gamification обнуляет соседние поля.",
+    "matchedStatuses": [
+      "failed"
+    ],
+    "messageRegex": "(?s).*(points\\.enabled|login\\.enabled|unit|course|certificate) ==> expected.*"
+  },
+  {
+    "name": "Баг бэка: письмо не тому получателю",
+    "description": "COURSE_INSTRUCTORS не раскрывается в email преподавателей: письмо уходит на заглушку instructors-of-<courseId>@local.",
+    "matchedStatuses": [
+      "failed"
+    ],
+    "messageRegex": "(?s).*instructors-of-.*"
+  },
+  {
+    "name": "Сервис недоступен",
+    "description": "Нет соединения с сервисом: проверьте, что docker compose запущен.",
+    "matchedStatuses": [
+      "broken",
+      "failed"
+    ],
+    "messageRegex": "(?s).*(Connection refused|ConnectException|UnknownHost).*"
+  },
+  {
+    "name": "Не дождались события из Kafka",
+    "description": "Событие не дошло до сервиса за время ожидания Wait.until.",
+    "matchedStatuses": [
+      "failed",
+      "broken"
+    ],
+    "messageRegex": "(?s).*Не дождались.*"
+  },
+  {
+    "name": "Ошибки в тестах (broken)",
+    "matchedStatuses": [
+      "broken"
+    ]
+  }
+]

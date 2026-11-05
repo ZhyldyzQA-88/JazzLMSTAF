@@ -1,5 +1,6 @@
 package kg.jazzlms.http;
 
+import io.qameta.allure.restassured.AllureRestAssured;
 import io.restassured.filter.log.RequestLoggingFilter;
 import io.restassured.filter.log.ResponseLoggingFilter;
 import io.restassured.http.ContentType;
@@ -31,6 +32,7 @@ public class ApiRequest {
                 .baseUri(url)
                 .contentType(ContentType.JSON)
                 .header("Authorization", "Bearer " + token)
+                .filter(new AllureRestAssured()) // запрос и ответ — вложения в отчёте Allure
                 .filter(new RequestLoggingFilter())
                 .filter(new ResponseLoggingFilter());
     }

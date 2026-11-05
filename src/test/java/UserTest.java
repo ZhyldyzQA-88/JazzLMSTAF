@@ -1,3 +1,5 @@
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
 import kg.jazzlms.constants.Endpoints;
 import kg.jazzlms.controller.UserController;
 import kg.jazzlms.models.response.UserResponse;
@@ -8,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 @Tag("regression")
+@Epic("User service")
+@Feature("Пользователи: базовые сценарии")
 public class UserTest {
 
     private final UserController userController = new UserController(Endpoints.BASE_URL);

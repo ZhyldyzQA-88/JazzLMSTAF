@@ -4,9 +4,12 @@ import io.restassured.response.Response;
 import kg.jazzlms.http.ApiRequest;
 import kg.jazzlms.models.request.CourseRequest;
 import kg.jazzlms.models.request.EnrollRequest;
+import kg.jazzlms.models.request.UnitRequest;
+import kg.jazzlms.models.response.CertificateResponse;
 import kg.jazzlms.models.response.CourseResponse;
 import kg.jazzlms.models.response.EnrollmentResponse;
 import kg.jazzlms.models.response.MyEnrollmentResponse;
+import kg.jazzlms.models.response.UnitResponse;
 import kg.jazzlms.utils.JsonUtils;
 
 import java.util.Arrays;
@@ -115,6 +118,52 @@ public class CourseController extends ApiRequest {
 
     public Response unenrollResponse(UUID enrollmentId) {
         return delete(String.format(ENROLLMENTS_ID, enrollmentId));
+    }
+
+    // ---------- units (уроки) ----------
+
+    /**
+     * POST /api/courses/{courseId}/units — multipart: часть "unit" (JSON) + необязательный "file".
+     * Для YouTube-видео файл не нужен, отправляем только JSON-часть.
+     */
+    public Response createUnitResponse(UUID courseId, UnitRequest unit) {
+        this.response = given().spec(requestSpecification)
+                .contentType("multipart/form-data")
+                .multiPart("unit", JsonUtils.toJson(unit), "application/json")
+                .post(String.format(COURSES_UNITS, courseId));
+        return this.response;
+    }
+
+    public UnitResponse createUnit(UUID courseId, UnitRequest unit) {
+        return createUnitResponse(courseId, unit).then().statusCode(201).extract().as(UnitResponse.class);
+    }
+
+    /** Уроки курса по порядку; completed/locked — для владельца токена */
+    public List<UnitResponse> getUnits(UUID courseId) {
+        return Arrays.asList(get(String.format(COURSES_UNITS, courseId))
+                .then().statusCode(200).extract().as(UnitResponse[].class));
+    }
+
+    /** "Открыть урок" — без этого complete вернёт 400 "Open the unit first" */
+    public Response startUnitResponse(UUID unitId) {
+        return post(String.format(UNITS_START, unitId), "");
+    }
+
+    /** Завершить урок (CHECKBOX — пустое тело; QUESTION — {"answer": "..."}) */
+    public Response completeUnitResponse(UUID unitId) {
+        return post(String.format(UNITS_COMPLETE, unitId), "{}");
+    }
+
+    /** Открыть и сразу завершить урок, как делает ученик в UI */
+    public UnitResponse passUnit(UUID unitId) {
+        startUnitResponse(unitId).then().statusCode(200);
+        return completeUnitResponse(unitId).then().statusCode(200).extract().as(UnitResponse.class);
+    }
+
+    // ---------- certificates ----------
+
+    public List<CertificateResponse> getMyCertificates() {
+        return Arrays.asList(get(CERTIFICATES_MY).then().statusCode(200).extract().as(CertificateResponse[].class));
     }
 
     // ---------- categories (нужны для categoryId) ----------

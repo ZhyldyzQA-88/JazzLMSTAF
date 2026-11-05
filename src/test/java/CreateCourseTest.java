@@ -1,3 +1,5 @@
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
 import io.restassured.response.Response;
 import kg.jazzlms.config.ConfigReader;
 import kg.jazzlms.constants.Endpoints;
@@ -30,6 +32,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @Tag("regression")
 @DisplayName("Course service: создание курса")
+@Epic("Course service")
+@Feature("Создание курса")
 public class CreateCourseTest {
 
     private static final CourseController COURSE_CONTROLLER = new CourseController(Endpoints.COURSE_URL);

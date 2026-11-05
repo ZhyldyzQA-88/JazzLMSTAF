@@ -1,3 +1,5 @@
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
 import io.restassured.response.Response;
 import kg.jazzlms.constants.Endpoints;
 import kg.jazzlms.controller.UserController;
@@ -16,6 +18,8 @@ import static kg.jazzlms.utils.EntityManager.userBuilder;
 import static org.junit.jupiter.api.Assertions.*;
 
 @Tag("regression")
+@Epic("User service")
+@Feature("Создание пользователя: негативные")
 public class CreateUserNegativeTest {
 
     private final UserController userController = new UserController(Endpoints.BASE_URL);

@@ -1,5 +1,6 @@
 package kg.jazzlms.controller;
 
+import io.qameta.allure.restassured.AllureRestAssured;
 import io.restassured.filter.log.RequestLoggingFilter;
 import io.restassured.filter.log.ResponseLoggingFilter;
 import io.restassured.http.ContentType;
@@ -25,6 +26,7 @@ public class AuthController {
         return given()
                 .baseUri(url)
                 .contentType(ContentType.JSON)
+                .filter(new AllureRestAssured())
                 .filter(new RequestLoggingFilter())
                 .filter(new ResponseLoggingFilter())
                 .body(new LoginRequest(username, password))
@@ -39,6 +41,7 @@ public class AuthController {
         return given()
                 .baseUri(url)
                 .header("Authorization", "Bearer " + token)
+                .filter(new AllureRestAssured())
                 .get(ME)
                 .then().statusCode(200).extract().as(UserResponse.class);
     }

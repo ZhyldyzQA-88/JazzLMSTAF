@@ -1,147 +1,152 @@
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
 import io.restassured.response.Response;
 import kg.jazzlms.constants.Endpoints;
 import kg.jazzlms.controller.AuthController;
 import kg.jazzlms.controller.CourseController;
 import kg.jazzlms.controller.UserController;
 import kg.jazzlms.models.request.CourseRequest;
-import kg.jazzlms.models.request.UserRequest;
 import kg.jazzlms.models.response.CourseResponse;
 import kg.jazzlms.models.response.EnrollmentResponse;
 import kg.jazzlms.models.response.MyEnrollmentResponse;
-import kg.jazzlms.models.response.UserResponse;
-import org.junit.jupiter.api.*;
+import kg.jazzlms.utils.Fixtures;
+import kg.jazzlms.utils.Fixtures.Account;
+import kg.jazzlms.utils.Fixtures.Session;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static kg.jazzlms.utils.EntityManager.courseBuilder;
-import static kg.jazzlms.utils.EntityManager.userBuilder;
+import static kg.jazzlms.utils.Fixtures.PASSWORD;
+import static kg.jazzlms.utils.Fixtures.findMyEnrollment;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * E2E: user-service + course-service через API gateway (8080), как работает фронт.
  *
- * Сценарий: админ заводит тренера и учеников -> они логинятся -> тренер создаёт курс ->
- * ученик находит его в каталоге и записывается -> course-service проверяет пользователя
- * в user-service по gRPC (имя/email в записи, неактивного не записать) -> прогресс до 100% ->
- * отписка -> удаление курса. Плюс ролевые ограничения gateway и сервисов.
+ * Каждый тест независимый: сам создаёт тренера, учеников и курс через Fixtures и удаляет их в @AfterEach.
+ * Тесты можно запускать по одному и в любом порядке.
  *
- * Шаги зависят друг от друга, поэтому идут по @Order в одном экземпляре класса.
- * Всё созданное удаляется в @AfterAll.
+ * Покрыто: логин и /me, неактивный пользователь, ролевые ограничения gateway и сервисов,
+ * создание курса тренером (createdBy из токена), автоматический INSTRUCTOR,
+ * каталог и самозапись (данные пользователя по gRPC), 409 на повтор и на полный курс,
+ * 404 для неактивного/несуществующего, learnersCount, "Мои курсы", прогресс до 100%,
+ * деактивация, отписка, удаление курса.
  */
 @Tag("e2e")
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("E2E: user service + course service")
+@Epic("E2E")
+@Feature("User + Course")
 public class UserCourseE2ETest {
 
-    private static final String PASSWORD = "Pass123!";
-
+    private final Fixtures fixtures = new Fixtures();
     private final AuthController auth = new AuthController(Endpoints.GATEWAY_URL);
     private final UserController adminUsers = new UserController(Endpoints.GATEWAY_URL);
     private final CourseController adminCourses = new CourseController(Endpoints.GATEWAY_URL);
 
-    private UUID categoryId;
-
-    // пользователи
-    private UserRequest trainerReq, learnerReq, learner2Req, inactiveReq;
-    private UserResponse trainer, learner, learner2, inactive;
-    private final List<UUID> createdUsers = new ArrayList<>();
-
-    // клиенты от имени пользователей
-    private String learnerToken;
-    private CourseController trainerCourses, learnerCourses, learner2Courses;
-
-    // курс и запись
-    private CourseResponse course;
-    private UUID enrollmentId;
-
-    @BeforeAll
-    void setUp() {
-        categoryId = adminCourses.getOrCreateCategoryId();
+    @AfterEach
+    void cleanUp() {
+        fixtures.cleanUp();
     }
 
     // ---------------------------------------------------------------- user service
 
     @Test
-    @Order(1)
-    @DisplayName("1. Админ создаёт тренера и учеников")
+    @DisplayName("Админ создаёт тренера и ученика с нужными ролями")
     void adminCreatesUsers() {
-        trainerReq  = userBuilder().password(PASSWORD).userType("TRAINER").active(true).build();
-        learnerReq  = userBuilder().password(PASSWORD).userType("LEARNER").active(true).build();
-        learner2Req = userBuilder().password(PASSWORD).userType("LEARNER").active(true).build();
-        inactiveReq = userBuilder().password(PASSWORD).userType("LEARNER").active(false).build();
-
-        trainer  = createUser(trainerReq);
-        learner  = createUser(learnerReq);
-        learner2 = createUser(learner2Req);
-        inactive = createUser(inactiveReq);
+        Account trainer = fixtures.createTrainer();
+        Account learner = fixtures.createLearner();
+        Account inactive = fixtures.createUser("LEARNER", false);
 
         assertAll(
-                () -> assertEquals("TRAINER", trainer.getUserType()),
-                () -> assertEquals("LEARNER", learner.getUserType()),
-                () -> assertTrue(learner.isActive()),
-                () -> assertFalse(inactive.isActive())
+                () -> assertEquals("TRAINER", trainer.user().getUserType()),
+                () -> assertEquals("LEARNER", learner.user().getUserType()),
+                () -> assertTrue(learner.user().isActive()),
+                () -> assertFalse(inactive.user().isActive())
         );
     }
 
     @Test
-    @Order(2)
-    @DisplayName("2. Тренер и ученики логинятся, /me возвращает их же")
+    @DisplayName("Тренер и ученик логинятся, /me возвращает их же")
     void usersLogIn() {
-        String trainerToken = auth.login(trainerReq.getUsername(), PASSWORD).getToken();
-        learnerToken = auth.login(learnerReq.getUsername(), PASSWORD).getToken();
-        String learner2Token = auth.login(learner2Req.getUsername(), PASSWORD).getToken();
+        Session trainer = fixtures.newTrainerSession();
+        Session learner = fixtures.newLearnerSession();
 
-        assertEquals(trainer.getId(), auth.me(trainerToken).getId());
-        assertEquals(learner.getId(), auth.me(learnerToken).getId());
-
-        trainerCourses  = new CourseController(Endpoints.GATEWAY_URL, trainerToken);
-        learnerCourses  = new CourseController(Endpoints.GATEWAY_URL, learnerToken);
-        learner2Courses = new CourseController(Endpoints.GATEWAY_URL, learner2Token);
+        assertEquals(trainer.id(), auth.me(trainer.token()).getId());
+        assertEquals(learner.id(), auth.me(learner.token()).getId());
     }
 
     @Test
-    @Order(3)
-    @DisplayName("3. Неактивный пользователь не может войти")
+    @DisplayName("Неактивный пользователь не может войти")
     void inactiveUserCannotLogIn() {
-        Response response = auth.loginResponse(inactiveReq.getUsername(), PASSWORD);
+        Account inactive = fixtures.createUser("LEARNER", false);
+
+        Response response = auth.loginResponse(inactive.username(), PASSWORD);
         assertEquals(401, response.statusCode(), response.asString());
+    }
+
+    @Test
+    @DisplayName("Деактивированный админом пользователь больше не может войти")
+    void deactivatedUserCannotLogIn() {
+        Account learner = fixtures.createLearner();
+        assertEquals(200, auth.loginResponse(learner.username(), PASSWORD).statusCode(), "до деактивации вход есть");
+
+        Response update = adminUsers.updateUserResponse(learner.id(), Map.of("active", false));
+        assertEquals(200, update.statusCode(), update.asString());
+
+        Response login = auth.loginResponse(learner.username(), PASSWORD);
+        assertEquals(401, login.statusCode(), login.asString());
     }
 
     // ---------------------------------------------------------------- ограничения по ролям
 
     @Test
-    @Order(4)
-    @DisplayName("4. Ученик не может создать курс (gateway -> 403)")
+    @DisplayName("Ученик не может создать курс (gateway -> 403)")
     void learnerCannotCreateCourse() {
-        Response response = learnerCourses.createCourseResponse(courseBuilder().build());
+        Session learner = fixtures.newLearnerSession();
+
+        Response response = learner.courses().createCourseResponse(courseBuilder().build());
         assertEquals(403, response.statusCode(), response.asString());
     }
 
     @Test
-    @Order(5)
-    @DisplayName("5. Ученик не может ходить в course-service напрямую, мимо gateway (401)")
+    @DisplayName("Ученик не может ходить в course-service напрямую, мимо gateway (401)")
     void learnerCannotCallCourseServiceDirectly() {
-        CourseController direct = new CourseController(Endpoints.COURSE_URL, learnerToken);
+        Session learner = fixtures.newLearnerSession();
+
+        CourseController direct = new CourseController(Endpoints.COURSE_URL, learner.token());
         Response response = direct.get(Endpoints.COURSES);
         assertEquals(401, response.statusCode(), response.asString());
     }
 
-    // ---------------------------------------------------------------- course service
+    @Test
+    @DisplayName("Ученик не может удалить курс (gateway -> 403)")
+    void learnerCannotDeleteCourse() {
+        CourseResponse course = fixtures.createCourseAs(fixtures.newTrainerSession());
+        Session learner = fixtures.newLearnerSession();
+
+        Response response = learner.courses().deleteCourseResponse(course.getId());
+        assertEquals(403, response.statusCode(), response.asString());
+    }
+
+    // ---------------------------------------------------------------- курс
 
     @Test
-    @Order(6)
-    @DisplayName("6. Тренер создаёт курс; createdBy берётся из токена, а не из X-User-Id")
+    @DisplayName("Тренер создаёт курс; createdBy берётся из токена, а не из X-User-Id")
     void trainerCreatesCourse() {
+        Session trainer = fixtures.newTrainerSession();
+        Account learner = fixtures.createLearner();
         CourseRequest request = courseBuilder()
                 .description("E2E course")
-                .categoryId(categoryId)
+                .categoryId(adminCourses.getOrCreateCategoryId())
                 .price(new BigDecimal("100.00"))
-                .capacity(1)                 // одно место: проверим "Course is full"
+                .capacity(1)
                 .level("BEGINNER")
                 .active(true)
                 .hiddenFromCatalog(false)
@@ -149,14 +154,15 @@ public class UserCourseE2ETest {
                 .build();
 
         // пытаемся выдать курс за ученика — сервис должен проигнорировать заголовок
-        Response response = trainerCourses.createCourseResponse(request, learner.getId());
+        Response response = trainer.courses().createCourseResponse(request, learner.id());
         assertEquals(201, response.statusCode(), response.asString());
-        course = response.as(CourseResponse.class);
+        CourseResponse course = response.as(CourseResponse.class);
+        fixtures.trackCourse(course.getId());
 
         assertAll(
                 () -> assertNotNull(course.getId()),
                 () -> assertEquals(request.getName(), course.getName()),
-                () -> assertEquals(trainer.getId(), course.getCreatedBy(), "createdBy = id из токена тренера"),
+                () -> assertEquals(trainer.id(), course.getCreatedBy(), "createdBy = id из токена тренера"),
                 () -> assertEquals(1, course.getCapacity()),
                 () -> assertEquals(0, course.getLearnersCount()),
                 () -> assertNull(course.getCertificateTemplateId(), "noCertificate=true")
@@ -164,77 +170,92 @@ public class UserCourseE2ETest {
     }
 
     @Test
-    @Order(7)
-    @DisplayName("7. Создатель курса автоматически становится INSTRUCTOR (имя и email из user-service)")
+    @DisplayName("Создатель курса автоматически становится INSTRUCTOR (имя и email из user-service)")
     void creatorIsInstructor() {
+        Session trainer = fixtures.newTrainerSession();
+        CourseResponse course = fixtures.createCourseAs(trainer);
+
         List<EnrollmentResponse> enrollments = adminCourses.getCourseEnrollments(course.getId());
 
         assertEquals(1, enrollments.size(), "в новом курсе только преподаватель");
         EnrollmentResponse instructor = enrollments.get(0);
         assertAll(
-                () -> assertEquals(trainer.getId(), instructor.getUserId()),
+                () -> assertEquals(trainer.id(), instructor.getUserId()),
                 () -> assertEquals("INSTRUCTOR", instructor.getRole()),
-                () -> assertEquals(fullName(trainer), instructor.getUserFullName()),
-                () -> assertEquals(trainer.getEmail(), instructor.getUserEmail())
+                () -> assertEquals(trainer.account().fullName(), instructor.getUserFullName()),
+                () -> assertEquals(trainer.account().email(), instructor.getUserEmail())
         );
     }
 
     @Test
-    @Order(8)
-    @DisplayName("8. Курс виден ученику в каталоге, enrolled = false")
+    @DisplayName("Курс виден ученику в каталоге, enrolled = false")
     void courseIsInCatalog() {
-        Response response = learnerCourses.catalogResponse();
+        CourseResponse course = fixtures.createCourseAs(fixtures.newTrainerSession());
+        Session learner = fixtures.newLearnerSession();
+
+        Response response = learner.courses().catalogResponse();
         assertEquals(200, response.statusCode(), response.asString());
 
         List<Boolean> enrolled = response.jsonPath()
                 .getList("findAll { it.course.id == '" + course.getId() + "' }.enrolled");
-        assertEquals(1, enrolled.size(), "курс должен быть в каталоге");
-        assertFalse(enrolled.get(0));
+        assertEquals(List.of(false), enrolled, "курс в каталоге, ученик не записан");
     }
 
+    // ---------------------------------------------------------------- запись на курс
+
     @Test
-    @Order(9)
-    @DisplayName("9. Ученик записывается сам: роль LEARNER, данные пользователя по gRPC")
+    @DisplayName("Ученик записывается сам: роль LEARNER, данные пользователя по gRPC")
     void learnerSelfEnrolls() {
-        Response response = learnerCourses.selfEnrollResponse(course.getId());
+        CourseResponse course = fixtures.createCourseAs(fixtures.newTrainerSession());
+        Session learner = fixtures.newLearnerSession();
+
+        Response response = learner.courses().selfEnrollResponse(course.getId());
         assertEquals(201, response.statusCode(), response.asString());
 
         EnrollmentResponse enrollment = response.as(EnrollmentResponse.class);
-        enrollmentId = enrollment.getId();
         assertAll(
                 () -> assertNotNull(enrollment.getId()),
                 () -> assertEquals(course.getId(), enrollment.getCourseId()),
-                () -> assertEquals(learner.getId(), enrollment.getUserId()),
+                () -> assertEquals(learner.id(), enrollment.getUserId()),
                 () -> assertEquals("LEARNER", enrollment.getRole()),
                 () -> assertEquals(0, enrollment.getProgress()),
-                () -> assertEquals(fullName(learner), enrollment.getUserFullName()),
-                () -> assertEquals(learner.getEmail(), enrollment.getUserEmail()),
+                () -> assertEquals(learner.account().fullName(), enrollment.getUserFullName()),
+                () -> assertEquals(learner.account().email(), enrollment.getUserEmail()),
                 () -> assertNull(enrollment.getCompletedAt())
         );
     }
 
     @Test
-    @Order(10)
-    @DisplayName("10. Повторная запись -> 409")
+    @DisplayName("Повторная запись -> 409")
     void secondEnrollIsConflict() {
-        Response response = learnerCourses.selfEnrollResponse(course.getId());
+        CourseResponse course = fixtures.createCourseAs(fixtures.newTrainerSession());
+        Session learner = fixtures.newLearnerSession();
+        fixtures.enroll(learner, course.getId());
+
+        Response response = learner.courses().selfEnrollResponse(course.getId());
         assertEquals(409, response.statusCode(), response.asString());
     }
 
     @Test
-    @Order(11)
-    @DisplayName("11. Мест нет (capacity = 1) -> 409 для второго ученика")
+    @DisplayName("Мест нет (capacity = 1) -> 409 для второго ученика")
     void courseIsFull() {
-        Response response = learner2Courses.selfEnrollResponse(course.getId());
+        Session trainer = fixtures.newTrainerSession();
+        CourseResponse course = fixtures.createCourseAs(trainer.courses(),
+                courseBuilder().active(true).hiddenFromCatalog(false).noCertificate(true).capacity(1).build());
+        fixtures.enroll(fixtures.newLearnerSession(), course.getId());
+
+        Response response = fixtures.newLearnerSession().courses().selfEnrollResponse(course.getId());
         assertEquals(409, response.statusCode(), response.asString());
     }
 
     @Test
-    @Order(12)
-    @DisplayName("12. Неактивного и несуществующего пользователя записать нельзя -> 404")
+    @DisplayName("Неактивного и несуществующего пользователя записать нельзя -> 404")
     void cannotEnrollInactiveOrUnknownUser() {
-        Response inactiveUser = adminCourses.enrollResponse(course.getId(), inactive.getId(), "LEARNER");
-        Response unknownUser  = adminCourses.enrollResponse(course.getId(), UUID.randomUUID(), "LEARNER");
+        CourseResponse course = fixtures.createCourseAs(fixtures.newTrainerSession());
+        Account inactive = fixtures.createUser("LEARNER", false);
+
+        Response inactiveUser = adminCourses.enrollResponse(course.getId(), inactive.id(), "LEARNER");
+        Response unknownUser = adminCourses.enrollResponse(course.getId(), UUID.randomUUID(), "LEARNER");
 
         assertAll(
                 () -> assertEquals(404, inactiveUser.statusCode(), inactiveUser.asString()),
@@ -243,38 +264,47 @@ public class UserCourseE2ETest {
     }
 
     @Test
-    @Order(13)
-    @DisplayName("13. learnersCount курса = 1 (преподаватель не считается)")
+    @DisplayName("learnersCount курса = 1 (преподаватель не считается)")
     void learnersCountUpdated() {
+        CourseResponse course = fixtures.createCourseAs(fixtures.newTrainerSession());
+        fixtures.enroll(fixtures.newLearnerSession(), course.getId());
+
         assertEquals(1, adminCourses.getCourseById(course.getId()).getLearnersCount());
     }
 
     @Test
-    @Order(14)
-    @DisplayName("14. Курс в 'Моих курсах' ученика, тренер в списке преподавателей")
+    @DisplayName("Курс в 'Моих курсах' ученика, тренер в списке преподавателей")
     void courseInMyCourses() {
-        MyEnrollmentResponse mine = findMyEnrollment(learnerCourses, course.getId());
+        Session trainer = fixtures.newTrainerSession();
+        CourseResponse course = fixtures.createCourseAs(trainer);
+        Session learner = fixtures.newLearnerSession();
+        EnrollmentResponse enrollment = fixtures.enroll(learner, course.getId());
+
+        MyEnrollmentResponse mine = findMyEnrollment(learner, course.getId());
 
         assertNotNull(mine, "курс должен быть в /api/enrollments/my");
         assertAll(
-                () -> assertEquals(enrollmentId, mine.getEnrollmentId()),
+                () -> assertEquals(enrollment.getId(), mine.getEnrollmentId()),
                 () -> assertEquals("LEARNER", mine.getRole()),
                 () -> assertEquals(0, mine.getProgress()),
-                () -> assertTrue(mine.getInstructors().contains(fullName(trainer)), "instructors: " + mine.getInstructors())
+                () -> assertTrue(mine.getInstructors().contains(trainer.account().fullName()), "instructors: " + mine.getInstructors())
         );
     }
 
     @Test
-    @Order(15)
-    @DisplayName("15. Прогресс 50% -> курс не завершён, 100% -> completedAt проставлен")
+    @DisplayName("Прогресс 50% -> курс не завершён, 100% -> completedAt проставлен")
     void progressToCompletion() {
-        Response half = learnerCourses.updateProgressResponse(enrollmentId, 50);
+        CourseResponse course = fixtures.createCourseAs(fixtures.newTrainerSession());
+        Session learner = fixtures.newLearnerSession();
+        UUID enrollmentId = fixtures.enroll(learner, course.getId()).getId();
+
+        Response half = learner.courses().updateProgressResponse(enrollmentId, 50);
         assertEquals(200, half.statusCode(), half.asString());
         EnrollmentResponse halfDone = half.as(EnrollmentResponse.class);
         assertEquals(50, halfDone.getProgress());
         assertNull(halfDone.getCompletedAt());
 
-        Response full = learnerCourses.updateProgressResponse(enrollmentId, 100);
+        Response full = learner.courses().updateProgressResponse(enrollmentId, 100);
         assertEquals(200, full.statusCode(), full.asString());
         EnrollmentResponse done = full.as(EnrollmentResponse.class);
         assertEquals(100, done.getProgress());
@@ -282,39 +312,26 @@ public class UserCourseE2ETest {
     }
 
     @Test
-    @Order(16)
-    @DisplayName("16. Деактивированный админом пользователь больше не может войти")
-    void deactivatedUserCannotLogIn() {
-        Response update = adminUsers.updateUserResponse(learner2.getId(), Map.of("active", false));
-        assertEquals(200, update.statusCode(), update.asString());
-
-        Response login = auth.loginResponse(learner2Req.getUsername(), PASSWORD);
-        assertEquals(401, login.statusCode(), login.asString());
-    }
-
-    @Test
-    @Order(17)
-    @DisplayName("17. Ученик не может удалить курс (gateway -> 403)")
-    void learnerCannotDeleteCourse() {
-        Response response = learnerCourses.deleteCourseResponse(course.getId());
-        assertEquals(403, response.statusCode(), response.asString());
-    }
-
-    @Test
-    @Order(18)
-    @DisplayName("18. Отписка: курс пропадает из 'Моих курсов'")
+    @DisplayName("Отписка: курс пропадает из 'Моих курсов'")
     void unenroll() {
+        CourseResponse course = fixtures.createCourseAs(fixtures.newTrainerSession());
+        Session learner = fixtures.newLearnerSession();
+        UUID enrollmentId = fixtures.enroll(learner, course.getId()).getId();
+        assertNotNull(findMyEnrollment(learner, course.getId()), "до отписки курс есть");
+
         Response response = adminCourses.unenrollResponse(enrollmentId);
         assertEquals(204, response.statusCode(), response.asString());
 
-        assertNull(findMyEnrollment(learnerCourses, course.getId()));
+        assertNull(findMyEnrollment(learner, course.getId()));
     }
 
     @Test
-    @Order(19)
-    @DisplayName("19. Тренер удаляет свой курс -> 404 по id, админ удаляет его окончательно")
+    @DisplayName("Тренер удаляет свой курс -> 404 по id, админ удаляет его окончательно")
     void trainerDeletesCourse() {
-        Response delete = trainerCourses.deleteCourseResponse(course.getId());
+        Session trainer = fixtures.newTrainerSession();
+        CourseResponse course = fixtures.createCourseAs(trainer);
+
+        Response delete = trainer.courses().deleteCourseResponse(course.getId());
         assertEquals(204, delete.statusCode(), delete.asString());
 
         Response get = adminCourses.getCourseByIdResponse(course.getId());
@@ -322,38 +339,6 @@ public class UserCourseE2ETest {
 
         Response permanent = adminCourses.deleteCoursePermanentlyResponse(course.getId());
         assertEquals(204, permanent.statusCode(), permanent.asString());
-        course = null;
-    }
-
-    // ---------------------------------------------------------------- cleanup
-
-    @AfterAll
-    void cleanUp() {
-        if (course != null) {   // сценарий упал раньше шага 19
-            adminCourses.deleteCourseResponse(course.getId());
-            adminCourses.deleteCoursePermanentlyResponse(course.getId());
-        }
-        createdUsers.forEach(adminUsers::deleteUserResponse);
-    }
-
-    // ---------------------------------------------------------------- helpers
-
-    private UserResponse createUser(UserRequest request) {
-        Response response = adminUsers.createUserResponse(request);
-        assertEquals(201, response.statusCode(), response.asString());
-        UserResponse user = response.as(UserResponse.class);
-        createdUsers.add(user.getId());
-        return user;
-    }
-
-    private static MyEnrollmentResponse findMyEnrollment(CourseController client, UUID courseId) {
-        return client.getMyEnrollments().stream()
-                .filter(e -> e.getCourse() != null && courseId.equals(e.getCourse().getId()))
-                .findFirst()
-                .orElse(null);
-    }
-
-    private static String fullName(UserResponse user) {
-        return user.getFirstName() + " " + user.getLastName();
+        fixtures.forgetCourse(course.getId());
     }
 }
